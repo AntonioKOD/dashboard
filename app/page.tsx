@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Header } from './components/dashboard/Header';
 import { MetricsOverview } from './components/dashboard/MetricsOverview';
 import { WorldMap } from './components/dashboard/WorldMap';
@@ -13,6 +14,8 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<ConflictEvent[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Initialize with live data using parallel fetching
   useEffect(() => {
@@ -53,6 +56,8 @@ export default function DashboardPage() {
     // Set up periodic data refresh (every 5 minutes for live data)
     const interval = setInterval(async () => {
       try {
+        setIsRefreshing(true);
+        setError(null);
         console.log('Refreshing dashboard data...');
         
         // Force refresh and parallel fetch
@@ -66,6 +71,9 @@ export default function DashboardPage() {
         setMetrics(freshMetrics);
       } catch (error) {
         console.error('Failed to refresh data:', error);
+        setError('Failed to refresh data. Using cached information.');
+      } finally {
+        setIsRefreshing(false);
       }
     }, 5 * 60 * 1000); // 5 minutes
 
@@ -129,9 +137,20 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-6 bg-amber-900/30 border border-amber-700 rounded-lg p-4">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+              <h3 className="text-sm font-medium text-amber-400">Data Refresh Warning</h3>
+            </div>
+            <p className="text-amber-300 mt-1 text-sm">{error}</p>
+          </div>
+        )}
+
         {/* Metrics Overview */}
         <div className="mb-8">
-          <MetricsOverview metrics={metrics} />
+          <MetricsOverview metrics={metrics} isLoading={isRefreshing} />
         </div>
 
         {/* Main Dashboard Grid */}
@@ -148,7 +167,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Additional Sections */}
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Regional Analysis Placeholder */}
           <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">Regional Analysis</h3>
@@ -164,6 +183,25 @@ export default function DashboardPage() {
             <div className="text-center py-8 text-slate-400">
               <p>Conflict trend charts coming soon...</p>
               <p className="text-sm mt-2">Historical analysis and forecasting tools</p>
+            </div>
+          </div>
+
+          {/* Mystery Investigation Section */}
+          <div className="bg-gradient-to-br from-purple-900/20 to-indigo-900/20 border border-purple-700/50 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-purple-300 mb-4 flex items-center">
+              <span className="mr-2">🔍</span>
+              Deep Investigation
+            </h3>
+            <div className="text-center py-6">
+              <p className="text-purple-200 mb-4">Want to know the real truth?</p>
+              <Link 
+                href="/nothing"
+                className="inline-flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-6 py-3 rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl border border-purple-400/30"
+              >
+                <span className="text-lg">🎯</span>
+                <span className="font-medium">Find Out What&apos;s Really Happening</span>
+              </Link>
+              <p className="text-xs text-purple-400 mt-2">Uncover the hidden truth</p>
             </div>
           </div>
         </div>

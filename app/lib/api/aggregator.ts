@@ -12,10 +12,18 @@ interface SourceStatus {
   eventCount: number;
 }
 
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+  sources?: number;
+}
+
 class ConflictDataAggregator {
-  private cache: Map<string, { data: any; timestamp: number }> = new Map();
+  private cache: Map<string, CacheEntry> = new Map();
   private readonly cacheTTL = 5 * 60 * 1000; // 5 minutes
+  private readonly longCacheTTL = 15 * 60 * 1000; // 15 minutes for less critical data
   private sourceStatus: Map<string, SourceStatus> = new Map();
+  private isRefreshing: Map<string, Promise<any>> = new Map(); // Prevent duplicate requests
 
   constructor() {
     this.initializeSourceStatus();
@@ -89,12 +97,34 @@ class ConflictDataAggregator {
     const cacheKey = 'all_events';
     const cached = this.cache.get(cacheKey);
 
+    // Return cached data if still valid
     if (!forceRefresh && cached && Date.now() - cached.timestamp < this.cacheTTL) {
       console.log(`Using cached conflict events (${cached.data.length} events)`);
       return cached.data;
     }
 
+    // Check if we're already refreshing to prevent duplicate requests
+    if (this.isRefreshing.has(cacheKey)) {
+      console.log('Already refreshing, waiting for existing request...');
+      return await this.isRefreshing.get(cacheKey)!;
+    }
+
     console.log('Fetching fresh conflict data from all sources...');
+
+    // Create the refresh promise
+    const refreshPromise = this.performDataFetch(cacheKey);
+    this.isRefreshing.set(cacheKey, refreshPromise);
+
+    try {
+      const result = await refreshPromise;
+      return result;
+    } finally {
+      this.isRefreshing.delete(cacheKey);
+    }
+  }
+
+  private async performDataFetch(cacheKey: string): Promise<ConflictEvent[]> {
+    const cached = this.cache.get(cacheKey);
 
     // Implement parallel data fetching as recommended by Next.js docs
     const dataPromises: Promise<ConflictEvent[] | null>[] = [];
@@ -130,7 +160,7 @@ class ConflictDataAggregator {
     }
 
     try {
-      // Execute all data fetches in parallel
+      // Execute all data fetches in parallel with timeout
       const results = await Promise.allSettled(dataPromises);
       
       const allEvents: ConflictEvent[] = [];
@@ -143,8 +173,8 @@ class ConflictDataAggregator {
           console.log(`Source ${index} returned ${events.length} events`);
           
           events.forEach(event => {
-            // Simple deduplication based on similar location and date
-            const dedupeKey = `${event.country}_${event.latitude.toFixed(2)}_${event.longitude.toFixed(2)}_${event.date}`;
+            // Enhanced deduplication based on multiple factors
+            const dedupeKey = `${event.country}_${event.latitude.toFixed(2)}_${event.longitude.toFixed(2)}_${event.date}_${event.event_type}`;
             if (!eventIds.has(dedupeKey)) {
               eventIds.add(dedupeKey);
               allEvents.push(event);
@@ -164,8 +194,12 @@ class ConflictDataAggregator {
 
       console.log(`Total events after deduplication: ${allEvents.length}`);
       
-      // Cache the results
-      this.cache.set(cacheKey, { data: allEvents, timestamp: Date.now() });
+      // Cache the results with performance metrics
+      this.cache.set(cacheKey, { 
+        data: allEvents, 
+        timestamp: Date.now(),
+        sources: results.filter(r => r.status === 'fulfilled').length
+      });
       
       return allEvents;
     } catch (error) {
@@ -231,29 +265,64 @@ class ConflictDataAggregator {
     console.log('Calculating dashboard metrics...');
     
     const events = await this.getAllConflictEvents();
-    const today = new Date().toISOString().split('T')[0];
     
-    // Calculate today's events
-    const todayEvents = events.filter(event => event.date === today);
+    // Use improved date filtering utilities
+    const { filterEventsByDateRange, getDateRange, isToday, isYesterday, calculatePercentageChange } = await import('../utils');
+    
+    // Get today's and yesterday's date ranges
+    const todayRange = getDateRange(0); // Today only
+    const yesterdayRange = getDateRange(1); // Yesterday only
+    yesterdayRange.end = new Date(yesterdayRange.end.getTime() - 24 * 60 * 60 * 1000); // Adjust end to yesterday
+    yesterdayRange.start = new Date(yesterdayRange.start.getTime() - 24 * 60 * 60 * 1000); // Adjust start to yesterday
+    
+    // Filter events for today and yesterday
+    const todayEvents = events.filter(event => isToday(event.date));
+    const yesterdayEvents = events.filter(event => isYesterday(event.date));
+    
+    // Calculate today's metrics
     const totalEventsToday = todayEvents.length;
     const totalFatalitiesToday = todayEvents.reduce((sum, event) => sum + event.fatalities, 0);
     
+    // Calculate yesterday's metrics for comparison
+    const totalEventsYesterday = yesterdayEvents.length;
+    const totalFatalitiesYesterday = yesterdayEvents.reduce((sum, event) => sum + event.fatalities, 0);
+    
+    // Calculate percentage changes
+    const eventsChange = calculatePercentageChange(totalEventsToday, totalEventsYesterday);
+    const fatalitiesChange = calculatePercentageChange(totalFatalitiesToday, totalFatalitiesYesterday);
+    
     // Calculate active conflicts (events in last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const recentEvents = events.filter(event => new Date(event.date) >= sevenDaysAgo);
+    const sevenDaysRange = getDateRange(7);
+    const recentEvents = filterEventsByDateRange(events, sevenDaysRange.start, sevenDaysRange.end);
     
     // Count unique countries with conflicts
     const activeCountries = new Set(recentEvents.map(event => event.country));
     const activeConflicts = activeCountries.size;
     
+    // Compare with previous week for active conflicts
+    const previousWeekRange = getDateRange(14);
+    previousWeekRange.end = new Date(previousWeekRange.end.getTime() - 7 * 24 * 60 * 60 * 1000);
+    previousWeekRange.start = new Date(previousWeekRange.start.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const previousWeekEvents = filterEventsByDateRange(events, previousWeekRange.start, previousWeekRange.end);
+    const previousActiveCountries = new Set(previousWeekEvents.map(event => event.country));
+    const activeConflictsChange = calculatePercentageChange(activeConflicts, previousActiveCountries.size);
+    
     // Count critical alerts (high and critical severity events in last 24 hours)
-    const oneDayAgo = new Date();
-    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-    const criticalAlerts = events.filter(event => 
-      new Date(event.date) >= oneDayAgo && 
-      (event.severity === 'critical' || event.severity === 'high')
+    const last24HoursRange = getDateRange(1);
+    const criticalEvents = filterEventsByDateRange(events, last24HoursRange.start, last24HoursRange.end);
+    const criticalAlerts = criticalEvents.filter(event => 
+      event.severity === 'critical' || event.severity === 'high'
     ).length;
+    
+    // Compare with previous 24 hours
+    const previous24HoursRange = getDateRange(2);
+    previous24HoursRange.end = new Date(previous24HoursRange.end.getTime() - 24 * 60 * 60 * 1000);
+    previous24HoursRange.start = new Date(previous24HoursRange.start.getTime() - 24 * 60 * 60 * 1000);
+    const previousCriticalEvents = filterEventsByDateRange(events, previous24HoursRange.start, previous24HoursRange.end);
+    const previousCriticalAlerts = previousCriticalEvents.filter(event => 
+      event.severity === 'critical' || event.severity === 'high'
+    ).length;
+    const criticalAlertsChange = calculatePercentageChange(criticalAlerts, previousCriticalAlerts);
     
     // Calculate global threat level
     const globalThreatLevel = calculateGlobalThreatLevel(recentEvents);
@@ -264,7 +333,14 @@ class ConflictDataAggregator {
       activeConflicts,
       criticalAlerts,
       globalThreatLevel,
-      dataLastUpdated: new Date().toISOString()
+      dataLastUpdated: new Date().toISOString(),
+      // Add percentage changes
+      percentageChanges: {
+        events: eventsChange,
+        fatalities: fatalitiesChange,
+        activeConflicts: activeConflictsChange,
+        criticalAlerts: criticalAlertsChange
+      }
     };
 
     console.log('Dashboard metrics calculated:', metrics);

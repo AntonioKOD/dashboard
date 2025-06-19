@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Globe, Settings, Bell, Shield, Activity, Coffee } from 'lucide-react';
+import { AlertTriangle, Globe, Settings, Bell, Shield, Activity, Coffee, Search } from 'lucide-react';
+import Link from 'next/link';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { ThreatLevel } from '../../types/conflict';
@@ -86,6 +87,19 @@ export function Header({ threatLevel, activeAlerts, lastUpdated }: HeaderProps) 
             <div className="text-xs text-slate-500">
               Updated: {formatDate(lastUpdated, 'HH:mm')}
             </div>
+
+            {/* Deep Investigation Button */}
+            <Link href="/nothing">
+              <Button 
+                variant="ghost" 
+                size="sm"
+                className="text-purple-400 hover:text-purple-300 hover:bg-purple-400/10 transition-colors"
+                title="Find out what's really happening"
+              >
+                <Search className="w-4 h-4 mr-1" />
+                <span className="text-xs hidden sm:inline">Truth</span>
+              </Button>
+            </Link>
 
             {/* Buy me a coffee */}
             <Button 

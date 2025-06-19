@@ -59,6 +59,12 @@ export interface DashboardMetrics {
   criticalAlerts: number;
   dataLastUpdated: string;
   globalThreatLevel: ThreatLevel;
+  percentageChanges?: {
+    events: number;
+    fatalities: number;
+    activeConflicts: number;
+    criticalAlerts: number;
+  };
 }
 
 export type EventType = 

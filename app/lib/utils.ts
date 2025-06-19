@@ -189,4 +189,47 @@ export function debounce<T extends (...args: any[]) => any>(
     clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };
+}
+
+// New utility functions for metrics calculations
+export function calculatePercentageChange(current: number, previous: number): number {
+  if (previous === 0) {
+    return current > 0 ? 100 : 0;
+  }
+  return ((current - previous) / previous) * 100;
+}
+
+export function formatPercentageChange(change: number): string {
+  const absChange = Math.abs(change);
+  const sign = change >= 0 ? '+' : '-';
+  return `${sign}${absChange.toFixed(1)}%`;
+}
+
+export function isToday(date: string | Date): boolean {
+  const today = new Date();
+  const eventDate = new Date(date);
+  return today.toDateString() === eventDate.toDateString();
+}
+
+export function isYesterday(date: string | Date): boolean {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const eventDate = new Date(date);
+  return yesterday.toDateString() === eventDate.toDateString();
+}
+
+export function getDateRange(days: number): { start: Date; end: Date } {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+export function filterEventsByDateRange(events: ConflictEvent[], start: Date, end: Date): ConflictEvent[] {
+  return events.filter(event => {
+    const eventDate = new Date(event.date);
+    return eventDate >= start && eventDate <= end;
+  });
 } 
