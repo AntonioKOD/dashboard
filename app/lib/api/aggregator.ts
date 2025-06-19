@@ -1,7 +1,8 @@
-import { ConflictEvent, DashboardMetrics, SeverityLevel, ThreatLevel } from '../../types/conflict';
+import { ConflictEvent, DashboardMetrics, SeverityLevel, ThreatLevel, EventType, DataSource } from '../../types/conflict';
 import { acledClient } from './acled';
 import { twitterClient } from './twitter';
 import { newsScraperClient } from './news-scraper';
+import { crisisMonitorClient } from './crisis-monitor';
 import { calculateGlobalThreatLevel } from '../utils';
 
 interface SourceStatus {
@@ -18,7 +19,7 @@ interface CacheEntry {
   sources?: number;
 }
 
-class ConflictDataAggregator {
+export class ConflictDataAggregator {
   private cache: Map<string, CacheEntry> = new Map();
   private readonly cacheTTL = 5 * 60 * 1000; // 5 minutes
   private readonly longCacheTTL = 15 * 60 * 1000; // 15 minutes for less critical data
@@ -53,6 +54,14 @@ class ConflictDataAggregator {
       errorCount: 0,
       eventCount: 0
     });
+
+    this.sourceStatus.set('Intelligence', {
+      name: 'Intelligence',
+      enabled: true, // Crisis monitoring is always available
+      lastFetch: null,
+      errorCount: 0,
+      eventCount: 0
+    });
   }
 
   private updateSourceStatus(sourceName: string, success: boolean, eventCount: number = 0) {
@@ -75,19 +84,42 @@ class ConflictDataAggregator {
   ): Promise<T | null> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const result = await fetchFn();
+        console.log(`Fetching from ${sourceName} (attempt ${attempt}/${maxRetries})`);
+        
+        // Add timeout to prevent hanging requests
+        const result = await Promise.race([
+          fetchFn(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error(`${sourceName} fetch timeout`)), 15000)
+          )
+        ]);
+        
         // Update event count if result is an array
         const eventCount = Array.isArray(result) ? result.length : 0;
         this.updateSourceStatus(sourceName, true, eventCount);
+        console.log(`✓ Successfully fetched from ${sourceName} (${eventCount} events)`);
         return result;
       } catch (error) {
         console.error(`${sourceName} attempt ${attempt}/${maxRetries} failed:`, error);
+        
+        // Check for specific error types that shouldn't be retried immediately
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isCorsError = errorMessage.includes('Failed to fetch') || errorMessage.includes('CORS');
+        const isTimeoutError = errorMessage.includes('timeout');
+        
         if (attempt === maxRetries) {
           this.updateSourceStatus(sourceName, false);
+          console.error(`✗ Final failure for ${sourceName}:`, error);
           return null;
         }
-        // Exponential backoff
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        
+        // Exponential backoff with jitter
+        const baseDelay = Math.pow(2, attempt) * 1000;
+        const jitter = Math.random() * 1000;
+        const delay = baseDelay + jitter;
+        
+        console.log(`Retrying ${sourceName} in ${Math.round(delay)}ms... (${isCorsError ? 'CORS' : isTimeoutError ? 'Timeout' : 'Network'} error)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
     return null;
@@ -159,6 +191,16 @@ class ConflictDataAggregator {
       );
     }
 
+    // Intelligence - Crisis monitoring and geopolitical alerts
+    if (this.sourceStatus.get('Intelligence')?.enabled) {
+      dataPromises.push(
+        this.fetchWithRetry(
+          () => crisisMonitorClient.convertCrisisAlertsToEvents(),
+          'Intelligence'
+        )
+      );
+    }
+
     try {
       // Execute all data fetches in parallel with timeout
       const results = await Promise.allSettled(dataPromises);
@@ -173,11 +215,47 @@ class ConflictDataAggregator {
           console.log(`Source ${index} returned ${events.length} events`);
           
           events.forEach(event => {
-            // Enhanced deduplication based on multiple factors
-            const dedupeKey = `${event.country}_${event.latitude.toFixed(2)}_${event.longitude.toFixed(2)}_${event.date}_${event.event_type}`;
-            if (!eventIds.has(dedupeKey)) {
-              eventIds.add(dedupeKey);
-              allEvents.push(event);
+            // Enhanced data quality validation and normalization
+            const location = this.validateAndNormalizeLocation(event);
+            const coordinates = this.validateCoordinates(event);
+            const timestamp = this.validateTimestamp(event);
+            const eventType = this.validateEventType(event);
+            const source = this.validateSource(event);
+            const severity = this.validateSeverity(event);
+            
+            // Only include events with valid core data
+            if (location !== 'INVALID' && eventType !== 'INVALID') {
+              // Enhanced deduplication based on multiple factors
+              const dedupeKey = `${location}_${coordinates.lat.toFixed(2)}_${coordinates.lng.toFixed(2)}_${timestamp}_${eventType}`;
+              if (!eventIds.has(dedupeKey)) {
+                eventIds.add(dedupeKey);
+                
+                // Normalize the event data before adding
+                const normalizedEvent = {
+                  ...event,
+                  location,
+                  coordinates,
+                  timestamp,
+                  eventType,
+                  source,
+                  severity,
+                  // Ensure required fields are present
+                  fatalities: event.fatalities || 0,
+                  actors: event.actors || [event.actor1, event.actor2].filter(Boolean),
+                  verified: event.verified || false,
+                  tags: event.tags || []
+                };
+                
+                allEvents.push(normalizedEvent);
+              }
+            } else {
+              console.warn('Skipping invalid event:', { 
+                id: event.id, 
+                location, 
+                eventType, 
+                originalLocation: event.location || event.country,
+                originalEventType: event.eventType || event.event_type 
+              });
             }
           });
         }
@@ -185,7 +263,9 @@ class ConflictDataAggregator {
 
       // Sort by date (most recent first) and severity
       allEvents.sort((a, b) => {
-        const dateComparison = new Date(b.date).getTime() - new Date(a.date).getTime();
+        const timestampA = a.timestamp || a.date || new Date().toISOString();
+        const timestampB = b.timestamp || b.date || new Date().toISOString();
+        const dateComparison = new Date(timestampB).getTime() - new Date(timestampA).getTime();
         if (dateComparison !== 0) return dateComparison;
         
         const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -276,8 +356,14 @@ class ConflictDataAggregator {
     yesterdayRange.start = new Date(yesterdayRange.start.getTime() - 24 * 60 * 60 * 1000); // Adjust start to yesterday
     
     // Filter events for today and yesterday
-    const todayEvents = events.filter(event => isToday(event.date));
-    const yesterdayEvents = events.filter(event => isYesterday(event.date));
+    const todayEvents = events.filter(event => {
+      const eventDate = event.timestamp || event.date;
+      return eventDate ? isToday(eventDate) : false;
+    });
+    const yesterdayEvents = events.filter(event => {
+      const eventDate = event.timestamp || event.date;
+      return eventDate ? isYesterday(eventDate) : false;
+    });
     
     // Calculate today's metrics
     const totalEventsToday = todayEvents.length;
@@ -296,7 +382,7 @@ class ConflictDataAggregator {
     const recentEvents = filterEventsByDateRange(events, sevenDaysRange.start, sevenDaysRange.end);
     
     // Count unique countries with conflicts
-    const activeCountries = new Set(recentEvents.map(event => event.country));
+    const activeCountries = new Set(recentEvents.map(event => event.location || event.country || 'unknown').filter(Boolean));
     const activeConflicts = activeCountries.size;
     
     // Compare with previous week for active conflicts
@@ -304,7 +390,7 @@ class ConflictDataAggregator {
     previousWeekRange.end = new Date(previousWeekRange.end.getTime() - 7 * 24 * 60 * 60 * 1000);
     previousWeekRange.start = new Date(previousWeekRange.start.getTime() - 7 * 24 * 60 * 60 * 1000);
     const previousWeekEvents = filterEventsByDateRange(events, previousWeekRange.start, previousWeekRange.end);
-    const previousActiveCountries = new Set(previousWeekEvents.map(event => event.country));
+    const previousActiveCountries = new Set(previousWeekEvents.map(event => event.location || event.country || 'unknown').filter(Boolean));
     const activeConflictsChange = calculatePercentageChange(activeConflicts, previousActiveCountries.size);
     
     // Count critical alerts (high and critical severity events in last 24 hours)
@@ -359,9 +445,10 @@ class ConflictDataAggregator {
   // Get events by specific criteria
   async getEventsByCountry(country: string): Promise<ConflictEvent[]> {
     const allEvents = await this.getAllConflictEvents();
-    return allEvents.filter(event => 
-      event.country.toLowerCase().includes(country.toLowerCase())
-    );
+    return allEvents.filter(event => {
+      const eventCountry = event.location || event.country || '';
+      return eventCountry.toLowerCase().includes(country.toLowerCase());
+    });
   }
 
   async getEventsBySeverity(severity: SeverityLevel): Promise<ConflictEvent[]> {
@@ -377,6 +464,155 @@ class ConflictDataAggregator {
       cacheSize: this.cache.size,
       lastUpdate: Math.max(...status.map(s => s.lastFetch?.getTime() || 0))
     };
+  }
+
+  // Data quality validation methods
+  private validateAndNormalizeLocation(event: ConflictEvent): string {
+    // Priority order: location > country > region
+    const rawLocation = event.location || event.country || event.region;
+    
+    if (!rawLocation) {
+      // Try to derive from coordinates if available
+      const coords = this.validateCoordinates(event);
+      if (coords.lat !== 0 || coords.lng !== 0) {
+        return this.getLocationFromCoordinates(coords.lat, coords.lng);
+      }
+      return 'INVALID'; // Mark as invalid rather than 'unknown'
+    }
+    
+    // Normalize common location variations
+    const normalizedLocation = this.normalizeLocationName(rawLocation.trim());
+    return normalizedLocation;
+  }
+  
+  private validateCoordinates(event: ConflictEvent): { lat: number; lng: number } {
+    const lat = event.coordinates?.lat || event.latitude || 0;
+    const lng = event.coordinates?.lng || event.longitude || 0;
+    
+    // Validate coordinate ranges
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      console.warn('Invalid coordinates detected:', { lat, lng, eventId: event.id });
+      return { lat: 0, lng: 0 };
+    }
+    
+    return { lat, lng };
+  }
+  
+  private validateTimestamp(event: ConflictEvent): string {
+    const timestamp = event.timestamp || event.date;
+    
+    if (!timestamp) {
+      return new Date().toISOString();
+    }
+    
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid timestamp detected:', timestamp, 'for event:', event.id);
+        return new Date().toISOString();
+      }
+      
+      // Ensure timestamp is not in the future
+      const now = new Date();
+      if (date > now) {
+        console.warn('Future timestamp detected:', timestamp, 'for event:', event.id);
+        return now.toISOString();
+      }
+      
+      return date.toISOString();
+    } catch (error) {
+      console.warn('Error parsing timestamp:', timestamp, 'for event:', event.id);
+      return new Date().toISOString();
+    }
+  }
+  
+  private validateEventType(event: ConflictEvent): EventType | 'INVALID' {
+    const eventType = event.eventType || event.event_type;
+    
+    if (!eventType) {
+      return 'INVALID'; // Mark as invalid rather than 'unknown'
+    }
+    
+    // Normalize event type variations
+    const normalizedType = this.normalizeEventType(eventType);
+    return normalizedType as EventType;
+  }
+  
+  private validateSource(event: ConflictEvent): DataSource {
+    const source = event.source;
+    
+    if (!source) {
+      // Try to derive from other fields
+      if (event.id?.includes('acled_')) return DataSource.ACLED;
+      if (event.id?.includes('news_')) return DataSource.News;
+      if (event.id?.includes('twitter_')) return DataSource.Twitter;
+      if (event.id?.includes('crisis_')) return DataSource.Intelligence;
+      
+      return DataSource.Manual; // Better than 'unknown'
+    }
+    
+    // Convert string to DataSource enum if needed
+    if (typeof source === 'string') {
+      switch (source.toLowerCase()) {
+        case 'acled': return DataSource.ACLED;
+        case 'news': return DataSource.News;
+        case 'twitter': return DataSource.Twitter;
+        case 'intelligence': return DataSource.Intelligence;
+        case 'crisiswatch': return DataSource.CrisisWatch;
+        default: return DataSource.Manual;
+      }
+    }
+    
+    return source as DataSource;
+  }
+  
+  private validateSeverity(event: ConflictEvent): SeverityLevel {
+    // Don't trust existing severity, recalculate based on data
+    const { calculateSeverity } = require('../utils');
+    return calculateSeverity(event);
+  }
+  
+  private normalizeLocationName(location: string): string {
+    // Common location normalizations
+    const normalizations: { [key: string]: string } = {
+      'gaza strip': 'Gaza',
+      'west bank': 'Palestine',
+      'drc': 'Democratic Republic of Congo',
+      'car': 'Central African Republic',
+      'uae': 'United Arab Emirates',
+      'usa': 'United States',
+      'uk': 'United Kingdom'
+    };
+    
+    const lowerLocation = location.toLowerCase();
+    return normalizations[lowerLocation] || location;
+  }
+  
+  private normalizeEventType(eventType: string): string {
+    // Common event type normalizations
+    const normalizations: { [key: string]: string } = {
+      'armed clash': 'Battle',
+      'battles': 'Battle',
+      'violence against civilians': 'ViolenceAgainstCivilians',
+      'explosions/remote violence': 'Bombing',
+      'suicide bomb': 'Bombing',
+      'air strike': 'Airstrike',
+      'drone strike': 'DroneStrike'
+    };
+    
+    const lowerType = eventType.toLowerCase();
+    return normalizations[lowerType] || eventType;
+  }
+  
+  private getLocationFromCoordinates(lat: number, lng: number): string {
+    // Simple coordinate-to-location mapping for major regions
+    if (lat >= 35 && lat <= 55 && lng >= 20 && lng <= 50) return 'Middle East';
+    if (lat >= 45 && lat <= 70 && lng >= 20 && lng <= 50) return 'Eastern Europe';
+    if (lat >= -35 && lat <= 35 && lng >= -20 && lng <= 55) return 'Africa';
+    if (lat >= 10 && lat <= 55 && lng >= 60 && lng <= 150) return 'Asia';
+    if (lat >= -55 && lat <= 35 && lng >= -170 && lng <= -30) return 'Americas';
+    
+    return 'Global'; // Better than 'unknown'
   }
 }
 

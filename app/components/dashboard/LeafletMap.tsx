@@ -27,10 +27,22 @@ L.Icon.Default.mergeOptions({
 export default function LeafletMap({ events, filter = 'all' }: LeafletMapProps) {
   const [selectedEvent, setSelectedEvent] = useState<ConflictEvent | null>(null);
 
-  // Filter events based on severity
-  const filteredEvents = events.filter(event => 
-    filter === 'all' || event.severity === filter
-  );
+  // Filter events based on severity and valid coordinates/dates
+  const filteredEvents = events.filter(event => {
+    // Check if event has valid coordinates
+    if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number' || 
+        isNaN(event.latitude) || isNaN(event.longitude)) {
+      return false;
+    }
+    
+    // Check if event has valid date
+    if (!event.date && !event.timestamp) {
+      return false;
+    }
+    
+    // Apply severity filter
+    return filter === 'all' || event.severity === filter;
+  });
 
   // Create custom icon for different severity levels
   const createCustomIcon = (severity: SeverityLevel) => {
@@ -112,7 +124,7 @@ export default function LeafletMap({ events, filter = 'all' }: LeafletMapProps) 
         {filteredEvents.map((event) => (
           <CircleMarker
             key={event.id}
-            center={[event.latitude, event.longitude]}
+            center={[event.latitude!, event.longitude!]}
             radius={event.severity === 'critical' ? 8 : event.severity === 'high' ? 6 : 4}
             pathOptions={{
               fillColor: getSeverityColor(event.severity),
@@ -139,7 +151,7 @@ export default function LeafletMap({ events, filter = 'all' }: LeafletMapProps) 
                 <div className="space-y-1 text-xs text-slate-600">
                   <div><strong>Country:</strong> {event.country}</div>
                   <div><strong>Region:</strong> {event.region}</div>
-                  <div><strong>Date:</strong> {formatDate(event.date, 'MMM dd, yyyy')}</div>
+                  <div><strong>Date:</strong> {formatDate(event.date || event.timestamp || new Date().toISOString(), 'MMM dd, yyyy')}</div>
                   <div><strong>Fatalities:</strong> {event.fatalities}</div>
                   <div><strong>Actors:</strong> {event.actor1}{event.actor2 ? ` vs ${event.actor2}` : ''}</div>
                   <div><strong>Source:</strong> {event.source}</div>

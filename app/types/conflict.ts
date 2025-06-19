@@ -1,19 +1,29 @@
 export interface ConflictEvent {
   id: string;
-  date: string;
-  country: string;
-  region: string;
-  latitude: number;
-  longitude: number;
-  event_type: EventType;
-  sub_event_type: string;
-  actor1: string;
-  actor2?: string;
-  fatalities: number;
-  source: DataSource;
-  notes: string;
-  severity: SeverityLevel;
+  title: string;
+  description: string;
+  location: string;
+  coordinates: { lat: number; lng: number };
   timestamp: string;
+  severity: SeverityLevel;
+  eventType: EventType;
+  source: DataSource;
+  fatalities: number;
+  actors: string[];
+  tags?: string[];
+  sourceUrl?: string;
+  verified?: boolean;
+  // Legacy fields for compatibility
+  date?: string;
+  country?: string;
+  region?: string;
+  latitude?: number;
+  longitude?: number;
+  event_type?: EventType;
+  sub_event_type?: string;
+  actor1?: string;
+  actor2?: string;
+  notes?: string;
 }
 
 export interface CountryStats {
@@ -67,23 +77,40 @@ export interface DashboardMetrics {
   };
 }
 
-export type EventType = 
-  | 'Armed clash'
-  | 'Attack'
-  | 'Airstrike'
-  | 'Bombing'
-  | 'Drone strike'
-  | 'Protest'
-  | 'Riot'
-  | 'Strategic development'
-  | 'Battle'
-  | 'Violence against civilians';
+export enum EventType {
+  Battle = 'Battle',
+  Bombing = 'Bombing',
+  ViolenceAgainstCivilians = 'Violence against civilians',
+  CyberAttack = 'Cyber attack',
+  Humanitarian = 'Humanitarian crisis',
+  Other = 'Other',
+  // Legacy types for compatibility
+  ArmedClash = 'Armed clash',
+  Attack = 'Attack',
+  Airstrike = 'Airstrike',
+  DroneStrike = 'Drone strike',
+  Protest = 'Protest',
+  Riot = 'Riot',
+  StrategicDevelopment = 'Strategic development'
+}
 
-export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical';
+export enum SeverityLevel {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+  Critical = 'critical'
+}
 
 export type ThreatLevel = 'minimal' | 'elevated' | 'high' | 'severe' | 'critical';
 
-export type DataSource = 'ACLED' | 'Twitter' | 'News' | 'Manual' | 'CrisisWatch';
+export enum DataSource {
+  ACLED = 'ACLED',
+  Twitter = 'Twitter',
+  News = 'News',
+  Intelligence = 'Intelligence',
+  Manual = 'Manual',
+  CrisisWatch = 'CrisisWatch'
+}
 
 export type AlertType = 'threshold' | 'pattern' | 'geographic' | 'escalation';
 

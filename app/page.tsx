@@ -6,6 +6,7 @@ import { Header } from './components/dashboard/Header';
 import { MetricsOverview } from './components/dashboard/MetricsOverview';
 import { WorldMap } from './components/dashboard/WorldMap';
 import { EventFeed } from './components/dashboard/EventFeed';
+import IntelligencePanel from './components/dashboard/IntelligencePanel';
 import { CoffeeButton } from './components/ui/CoffeeButton';
 import { ConflictEvent, DashboardMetrics } from './types/conflict';
 import { conflictDataAggregator } from './lib/api/aggregator';
@@ -25,17 +26,42 @@ export default function DashboardPage() {
       try {
         console.log('Starting dashboard initialization...');
         
-        // Parallel data fetching for better performance
-        const [liveEvents, dashboardMetrics] = await Promise.all([
-          conflictDataAggregator.getAllConflictEvents(),
-          conflictDataAggregator.getDashboardMetrics()
-        ]);
+        // Add timeout to prevent infinite loading
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Data fetch timeout')), 8000) // 8 second timeout
+        );
+        
+        // Parallel data fetching for better performance with timeout
+        const [liveEvents, dashboardMetrics] = await Promise.race([
+          Promise.all([
+            conflictDataAggregator.getAllConflictEvents(),
+            conflictDataAggregator.getDashboardMetrics()
+          ]),
+          timeoutPromise
+        ]) as [any[], any];
 
         console.log(`Loaded ${liveEvents.length} events for dashboard`);
         setEvents(liveEvents);
         setMetrics(dashboardMetrics);
       } catch (error) {
         console.error('Failed to load live data:', error);
+        setError(error instanceof Error && error.message === 'Data fetch timeout' 
+          ? 'Dashboard is loading in the background. Content will appear shortly.'
+          : 'Some data sources are temporarily unavailable.');
+        
+        // Try to get cached data or fallback
+        try {
+          const cachedEvents = await conflictDataAggregator.getAllConflictEvents();
+          if (cachedEvents.length > 0) {
+            setEvents(cachedEvents);
+            const cachedMetrics = await conflictDataAggregator.getDashboardMetrics();
+            setMetrics(cachedMetrics);
+            return;
+          }
+        } catch (cachedError) {
+          console.warn('Cached data also failed:', cachedError);
+        }
+        
         // Fallback to empty array if APIs fail
         setEvents([]);
         setMetrics({
@@ -160,10 +186,15 @@ export default function DashboardPage() {
             <WorldMap events={events} />
           </div>
 
-          {/* Event Feed - Takes up 1 column */}
+          {/* Event Feed - Takes up 1 column, always shown with enhanced styling */}
           <div className="xl:col-span-1">
-            <EventFeed events={events} />
+            <EventFeed events={events} maxEvents={50} />
           </div>
+        </div>
+
+        {/* Intelligence Panel - Full width section */}
+        <div className="mt-8">
+          <IntelligencePanel />
         </div>
 
         {/* Additional Sections */}
@@ -214,6 +245,19 @@ export default function DashboardPage() {
               Data sources: ACLED, Twitter, News RSS • 
               <span className="ml-2">Last updated: {new Date().toLocaleTimeString()}</span>
             </p>
+            
+            {/* Built by Section */}
+            <div className="flex justify-center items-center space-x-2 pt-2">
+              <span className="text-slate-400">Built by</span>
+              <a
+                href="https://codewithtoni.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 transition-colors duration-200 font-medium"
+              >
+                CodeWithToni
+              </a>
+            </div>
             
             {/* Support Section */}
             <div className="flex flex-col items-center space-y-3 pt-4 border-t border-slate-800">

@@ -7,21 +7,93 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatDate(date: string | Date, formatStr: string = "MMM dd, yyyy HH:mm"): string {
-  return format(new Date(date), formatStr);
+  try {
+    // Handle null, undefined, or empty string dates
+    if (!date) {
+      return 'Unknown date';
+    }
+    
+    const dateObj = new Date(date);
+    
+    // Check if the date is valid
+    if (isNaN(dateObj.getTime())) {
+      console.warn('Invalid date provided to formatDate:', date);
+      return 'Invalid date';
+    }
+    
+    return format(dateObj, formatStr);
+  } catch (error) {
+    console.error('Error formatting date:', error, 'Date value:', date);
+    return 'Invalid date';
+  }
 }
 
 export function calculateSeverity(event: ConflictEvent): SeverityLevel {
-  const { fatalities, event_type } = event;
+  const fatalities = event.fatalities || 0;
+  const eventType = event.event_type || event.eventType;
   
-  // Base severity on fatalities and event type
-  if (fatalities >= 50 || event_type === 'Bombing' || event_type === 'Airstrike') {
-    return 'critical';
-  } else if (fatalities >= 10 || event_type === 'Armed clash' || event_type === 'Battle') {
-    return 'high';
-  } else if (fatalities >= 1 || event_type === 'Attack' || event_type === 'Violence against civilians') {
-    return 'medium';
+  // Enhanced severity calculation with multiple factors
+  let severityScore = 0;
+  
+  // Fatality-based scoring (0-40 points)
+  if (fatalities >= 100) severityScore += 40;
+  else if (fatalities >= 50) severityScore += 35;
+  else if (fatalities >= 25) severityScore += 30;
+  else if (fatalities >= 10) severityScore += 25;
+  else if (fatalities >= 5) severityScore += 20;
+  else if (fatalities >= 1) severityScore += 15;
+  else severityScore += 5; // Even zero-fatality events have some severity
+  
+  // Event type-based scoring (0-30 points)
+  if (eventType) {
+    const typeStr = eventType.toString().toLowerCase();
+    if (typeStr.includes('bombing') || typeStr.includes('airstrike') || typeStr.includes('explosion')) {
+      severityScore += 30;
+    } else if (typeStr.includes('battle') || typeStr.includes('armed clash') || typeStr.includes('clash')) {
+      severityScore += 25;
+    } else if (typeStr.includes('attack') || typeStr.includes('violence against civilians')) {
+      severityScore += 20;
+    } else if (typeStr.includes('drone strike') || typeStr.includes('missile')) {
+      severityScore += 25;
+    } else if (typeStr.includes('cyber attack')) {
+      severityScore += 15;
+    } else {
+      severityScore += 10; // Default for other event types
+    }
+  } else {
+    severityScore += 5; // Minimal score for unknown event type
   }
-  return 'low';
+  
+  // Additional factors (0-30 points)
+  // Source reliability
+  const source = event.source;
+  if (source === 'ACLED' || source === 'Intelligence') {
+    severityScore += 10; // Reliable sources
+  } else if (source === 'News') {
+    severityScore += 8;
+  } else if (source === 'Twitter') {
+    severityScore += 5; // Less reliable
+  }
+  
+  // Verification status
+  if (event.verified) {
+    severityScore += 10;
+  }
+  
+  // Recent events are more severe
+  const timestamp = event.timestamp || event.date;
+  if (timestamp) {
+    const eventDate = new Date(timestamp);
+    const hoursAgo = (Date.now() - eventDate.getTime()) / (1000 * 60 * 60);
+    if (hoursAgo <= 6) severityScore += 10;
+    else if (hoursAgo <= 24) severityScore += 5;
+  }
+  
+  // Convert score to severity level (0-100 scale)
+  if (severityScore >= 75) return 'critical';
+  else if (severityScore >= 55) return 'high';
+  else if (severityScore >= 35) return 'medium';
+  else return 'low';
 }
 
 export function getSeverityColor(severity: SeverityLevel): string {
@@ -74,7 +146,17 @@ export function filterEventsByTimeRange(events: ConflictEvent[], timeRange: stri
       return events;
   }
 
-  return events.filter(event => isAfter(new Date(event.date), startDate));
+  return events.filter(event => {
+    try {
+      if (!event.date) return false;
+      const eventDate = new Date(event.date);
+      if (isNaN(eventDate.getTime())) return false;
+      return isAfter(eventDate, startDate);
+    } catch (error) {
+      console.warn('Error filtering event by date:', error, 'Event:', event);
+      return false;
+    }
+  });
 }
 
 export function calculateCountryStats(events: ConflictEvent[], country: string): CountryStats {
@@ -206,16 +288,42 @@ export function formatPercentageChange(change: number): string {
 }
 
 export function isToday(date: string | Date): boolean {
-  const today = new Date();
-  const eventDate = new Date(date);
-  return today.toDateString() === eventDate.toDateString();
+  try {
+    if (!date) return false;
+    
+    const today = new Date();
+    const eventDate = new Date(date);
+    
+    // Check if the date is valid
+    if (isNaN(eventDate.getTime())) {
+      return false;
+    }
+    
+    return today.toDateString() === eventDate.toDateString();
+  } catch (error) {
+    console.warn('Error checking if date is today:', error, 'Date value:', date);
+    return false;
+  }
 }
 
 export function isYesterday(date: string | Date): boolean {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const eventDate = new Date(date);
-  return yesterday.toDateString() === eventDate.toDateString();
+  try {
+    if (!date) return false;
+    
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const eventDate = new Date(date);
+    
+    // Check if the date is valid
+    if (isNaN(eventDate.getTime())) {
+      return false;
+    }
+    
+    return yesterday.toDateString() === eventDate.toDateString();
+  } catch (error) {
+    console.warn('Error checking if date is yesterday:', error, 'Date value:', date);
+    return false;
+  }
 }
 
 export function getDateRange(days: number): { start: Date; end: Date } {
@@ -229,7 +337,20 @@ export function getDateRange(days: number): { start: Date; end: Date } {
 
 export function filterEventsByDateRange(events: ConflictEvent[], start: Date, end: Date): ConflictEvent[] {
   return events.filter(event => {
-    const eventDate = new Date(event.date);
-    return eventDate >= start && eventDate <= end;
+    const dateStr = getEventDate(event);
+    if (!dateStr) return false;
+    
+    try {
+      const eventDate = new Date(dateStr);
+      if (isNaN(eventDate.getTime())) return false;
+      return eventDate >= start && eventDate <= end;
+    } catch (error) {
+      return false;
+    }
   });
+}
+
+// Utility function to safely get event date
+export function getEventDate(event: ConflictEvent): string | null {
+  return event.timestamp || event.date || null;
 } 
