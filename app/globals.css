@@ -1,13 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #020617;
+  --foreground: #f1f5f9;
+  --accent: #dc2626;
+  --warning: #f59e0b;
+  --success: #10b981;
+  --border: #334155;
+  --card-bg: #0f172a;
+  --muted: #64748b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-card-bg: var(--card-bg);
+  --color-muted: var(--muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -22,5 +34,115 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--card-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Conflict severity colors */
+.severity-critical {
+  color: #dc2626;
+  border-color: #dc2626;
+}
+
+.severity-high {
+  color: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.severity-medium {
+  color: #f97316;
+  border-color: #f97316;
+}
+
+.severity-low {
+  color: #10b981;
+  border-color: #10b981;
+}
+
+/* Map container styles */
+.leaflet-container {
+  background: var(--background) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.leaflet-control-container .leaflet-control {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--card-bg) !important;
+  color: var(--foreground) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.leaflet-popup-tip {
+  background: var(--card-bg) !important;
+}
+
+/* Custom animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fade-in 0.5s ease-out;
+}
+
+/* Gradient background for cards */
+.gradient-border {
+  background: linear-gradient(135deg, transparent, rgba(148, 163, 184, 0.1), transparent);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Emergency alert styling */
+.emergency-alert {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(239, 68, 68, 0.1));
+  border: 1px solid rgba(220, 38, 38, 0.5);
+  box-shadow: 0 0 20px rgba(220, 38, 38, 0.3);
 }
