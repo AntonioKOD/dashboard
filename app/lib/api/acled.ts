@@ -1,4 +1,4 @@
-import { ConflictEvent, EventType } from '../../types/conflict';
+import { ConflictEvent, EventType, DataSource, SeverityLevel } from '../../types/conflict';
 import { calculateSeverity } from '../utils';
 
 interface ACLEDEvent {
@@ -94,9 +94,9 @@ class ACLEDClient {
       actor1: acledEvent.actor1,
       actor2: acledEvent.actor2,
       fatalities: acledEvent.fatalities || 0,
-      source: 'ACLED',
+      source: 'ACLED' as DataSource,
       notes: acledEvent.notes,
-      severity: 'low', // Will be calculated
+      severity: SeverityLevel.Low, // Will be calculated
       timestamp: new Date().toISOString()
     };
 

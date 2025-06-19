@@ -69,14 +69,14 @@ function calculateDataCompleteness(events: any[]): any {
   });
   
   // Convert to percentages
-  Object.keys(completeness).forEach(key => {
+  (Object.keys(completeness) as Array<keyof typeof completeness>).forEach(key => {
     if (key !== 'overall') {
       completeness[key] = Math.round((completeness[key] / events.length) * 100);
     }
   });
   
   // Calculate overall completeness
-  const fields = ['location', 'coordinates', 'timestamp', 'eventType', 'source', 'severity', 'actors'];
+  const fields: Array<keyof typeof completeness> = ['location', 'coordinates', 'timestamp', 'eventType', 'source', 'severity', 'actors'];
   completeness.overall = Math.round(fields.reduce((sum, field) => sum + completeness[field], 0) / fields.length);
   
   return completeness;
@@ -128,14 +128,14 @@ function calculateDataAccuracy(events: any[]): any {
   });
   
   // Convert to percentages
-  Object.keys(accuracy).forEach(key => {
+  (Object.keys(accuracy) as Array<keyof typeof accuracy>).forEach(key => {
     if (key !== 'overall') {
       accuracy[key] = Math.round((accuracy[key] / events.length) * 100);
     }
   });
   
   // Calculate overall accuracy
-  const fields = ['validCoordinates', 'validTimestamps', 'validSeverity', 'validEventTypes'];
+  const fields: Array<keyof typeof accuracy> = ['validCoordinates', 'validTimestamps', 'validSeverity', 'validEventTypes'];
   accuracy.overall = Math.round(fields.reduce((sum, field) => sum + accuracy[field], 0) / fields.length);
   
   return accuracy;
@@ -168,14 +168,14 @@ function calculateSeverityDistribution(events: any[]): any {
   
   events.forEach(event => {
     const severity = event.severity || 'low';
-    if (distribution.hasOwnProperty(severity)) {
-      distribution[severity]++;
+    if (severity in distribution) {
+      distribution[severity as keyof typeof distribution]++;
     }
   });
   
   // Convert to percentages
   const total = events.length;
-  Object.keys(distribution).forEach(severity => {
+  (Object.keys(distribution) as Array<keyof typeof distribution>).forEach(severity => {
     distribution[severity] = Math.round((distribution[severity] / total) * 100);
   });
   
@@ -252,7 +252,7 @@ function performValidationChecks(events: any[]): any {
 
 function findDuplicateEvents(events: any[]): any {
   const seen = new Map();
-  const duplicates = [];
+  const duplicates: any[] = [];
   
   events.forEach(event => {
     const key = `${event.location}_${event.timestamp}_${event.eventType || event.event_type}`;
@@ -296,11 +296,12 @@ function findMissingCriticalFields(events: any[]): any {
     source: events.filter(e => !e.source).length
   };
   
-  Object.keys(missing).forEach(field => {
+  (Object.keys(missing) as Array<keyof typeof missing>).forEach(field => {
+    const count = missing[field];
     missing[field] = {
-      count: missing[field],
-      percentage: Math.round((missing[field] / events.length) * 100)
-    };
+      count,
+      percentage: Math.round((count / events.length) * 100)
+    } as any;
   });
   
   return missing;
@@ -371,7 +372,7 @@ function calculateOverallQualityScore(metrics: any): number {
     consistency: 100 - metrics.validationResults.inconsistentData.percentage
   };
   
-  const weightedScore = Object.keys(weights).reduce((sum, key) => {
+  const weightedScore = (Object.keys(weights) as Array<keyof typeof weights>).reduce((sum, key) => {
     return sum + (scores[key] * weights[key]);
   }, 0);
   

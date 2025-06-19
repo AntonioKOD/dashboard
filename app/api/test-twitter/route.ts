@@ -44,7 +44,7 @@ export async function GET(_request: Request) {
         severity: event.severity,
         author: event.actor1,
         source: event.source,
-        notes: event.notes.slice(0, 100) + '...'
+        notes: event.notes ? event.notes.slice(0, 100) + '...' : 'No notes available'
       })),
       lastUpdated: new Date().toISOString()
     });
